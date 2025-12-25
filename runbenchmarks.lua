@@ -4,34 +4,52 @@
 
 -- List of binaries that will be tested
 local binaries = {
-    { 'lua-5.3.4', 'lua' },
-    { 'luajit-2.0.4-interp', 'luajit -joff' },
-    { 'luajit-2.0.4', 'luajit' },
+    { 'lua-5.5.0', 'lua5.5' },
+    { 'lua-5.4.6', 'lua5.4' },
+    { 'lua-5.3.6', 'lua5.3' },
+    { 'lua-5.2.4', 'lua5.2' },
+    { 'lua-5.1.5', 'lua5.1' },
+    --{ 'luajit-2.1.174-interp', 'luajit -joff' },
+    { 'luajit-2.1.174', 'luajit' },
 }
 
 -- List of tests
 local tests_root = './'
 local tests = {
-    { 'ack', 'ack.lua 3 10' },
-    { 'fixpoint-fact', 'fixpoint-fact.lua 3000' },
-    { 'heapsort', 'heapsort.lua 10 250000' },
+    { 'brainfuck', 'brainfuck.lua 10' },
+    { 'mem-access', 'mem-access.lua 150' },
+    { 'oop-dots', 'oop-dots.lua 100' },
+    { 'c-call', 'c-call.lua 550' },
+    { 'ray', 'ray.lua 768' },
+    { 'coro', 'coro-scheduler.lua 450' },
+    { 'json', 'json-serializer.lua 55' },
+
+    -- Ackermann is a synthetic deep recursion test. It mostly benchmarks stack limits/call overhead, irrelevant for real-world logic.
+    -- { 'ack', 'ack.lua 3 10' },
+
+    -- Uses Y-combinator (functional style) to calculate factorial. Non-idiomatic for Lua (creates excessive closures instead of loops).
+    -- { 'fixpoint-fact', 'fixpoint-fact.lua 3000' },
+
+    -- Too simplistic/redundant. Array/table access is better benchmarked by 'heapsort' and 'fannkuch'.
+    -- { 'sieve', 'sieve.lua 5000' },
+
+    { 'heapsort', 'heapsort.lua 10 150000' },
     { 'mandelbrot', 'mandel.lua' },
     { 'juliaset', 'qt.lua' },
     { 'queen', 'queen.lua 12' },
-    { 'sieve', 'sieve.lua 5000' }, -- Sieve of Eratosthenes
-    { 'binary', 'binary-trees.lua 15' },
-    { 'n-body', 'n-body.lua 1000000' },
-    { 'fannkuch', 'fannkuch-redux.lua 10' },
+    { 'binary', 'binary-trees.lua 13' },
+    { 'n-body', 'n-body.lua 900000' },
+    { 'fannkuch', 'fannkuch-redux.lua 9' },
     { 'fasta', 'fasta.lua 2500000' },
     { 'k-nucleotide', 'k-nucleotide.lua < fasta1000000.txt' },
-    --{ 'regex-dna', 'regex-dna.lua < fasta1000000.txt' },
+    { 'regex-dna', 'regex-dna.lua < fasta1000000.txt' },
     { 'spectral-norm', 'spectral-norm.lua 1000' },
 }
 
 -- Command line arguments ------------------------------------------------------
 
 local nruns = 3
-local supress_errors = true 
+local supress_errors = true
 local basename = 'results'
 local normalize = false
 local speedup = false
@@ -93,14 +111,16 @@ end
 
 -- Run the command a single time and returns the time elapsed
 local function measure(cmd)
-    local time_cmd = '{ TIMEFORMAT=\'%3R\'; time ' ..  cmd ..
-            ' > /dev/null; } 2>&1'
+    -- Changed: explicitly call 'bash -c' because TIMEFORMAT is a bash-specific feature.
+    -- Default /bin/sh (used by io.popen) often doesn't support it.
+    local time_cmd = 'bash -c "TIMEFORMAT=\'%3R\'; time ' ..  cmd ..
+            ' > /dev/null" 2>&1'
     local handle = io.popen(time_cmd)
     local result = handle:read("*a")
     local time_elapsed = tonumber(result)
     handle:close()
     if not time_elapsed then
-        error('Invalid output for "' .. cmd .. '":\n' .. result)
+        error('Invalid output for "' .. cmd .. '":\n' .. (result or 'nil'))
     end
     return time_elapsed
 end
@@ -142,7 +162,7 @@ local function run_all()
             end
         end
     end
-    return results 
+    return results
 end
 
 -- Perform an operation for each value in the matrix
@@ -174,7 +194,7 @@ local function create_data_file(results)
     for i, test in ipairs(tests) do
         data = data .. test[1] .. '\t'
         for j, _ in ipairs(binaries) do
-            data = data .. results[i][j] .. '\t' 
+            data = data .. results[i][j] .. '\t'
         end
         data = data .. '\n'
     end
