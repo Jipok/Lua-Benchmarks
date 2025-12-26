@@ -14,6 +14,7 @@ Kernel: 6.12.62
 CPU:    Intel(R) N100 (4) @ 3.40 GHz
 ```
 ![](https://raw.githubusercontent.com/Jipok/Lua-Benchmarks/master/results.png)
+![](https://raw.githubusercontent.com/Jipok/Lua-Benchmarks/master/results-norm.png)
 
 ## 🧪 Test Suite
 
@@ -45,30 +46,36 @@ Standard benchmarks tailored for raw computation and algorithmic efficiency:
 ## 🚀 Usage
 
 ### Requirements
-*   **Bash** (The runner uses `TIMEFORMAT` for precision).
-*   **Gnuplot** (Optional, for generating graphs).
-*   Correctly named Lua binaries in your `$PATH` (e.g., `lua5.1`, `luajit`, etc.), or edit `runbenchmarks.lua` to match your system.
+*   **Lua** (to run the benchmark runner).
+*   **Gnuplot** (Required for generating PNG graphs via `plots.sh`).
+*   Correctly named Lua binaries in your `$PATH` (e.g., `lua5.1`, `luajit`, etc.), or edit `binaries` table in `runbenchmarks.lua`.
 
 ### Running tests
 
-Basic run (3 iterations per test):
-```bash
-lua runbenchmarks.lua
-```
+1. **Run the benchmarks:**
+   This will execute tests and automatically generate raw data (`.dat`), normalized data (`-norm.dat`), and speedup factors (`-speed.dat`).
+   
+   ```bash
+   lua runbenchmarks.lua
+   ```
 
-Generate speedup comparison relative to Lua 5.1:
-```bash
-lua runbenchmarks.lua --speedup --output comparison --nruns 5
-```
+2. **Generate Graphs:**
+   Use the included shell script to create PNG images from the generated data files. Pass the output base name used in step 1 (default is `results`).
 
-### Options
+   ```bash
+   chmod +x plot.sh
+   ./plot.sh results
+   ```
+   
+   > If you used a custom output name: `./plot.sh my_bench`
+
+### Options (`runbenchmarks.lua`)
+
 ```text
   --nruns <n>      Number of times each test is executed (default = 3)
-  --no-supress     Show full error messages from tests
-  --output <name>  Filename prefix for the output results (txt/png)
-  --normalize      Normalize the result based on the first binary
-  --speedup        Compute speedup factor based on the first binary
-  --no-plot        Skip Gnuplot generation
+  --no-supress     Show full error messages from tests (if they fail)
+  --output <name>  Filename prefix for the output results (default = 'results')
+                   Generates: <name>.dat, <name>-norm.dat, <name>-speed.dat
 ```
 
 ## Credits

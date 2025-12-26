@@ -4,11 +4,11 @@
 
 -- List of binaries that will be tested
 local binaries = {
-    { 'lua-5.5.0', 'lua5.5' },
-    { 'lua-5.4.6', 'lua5.4' },
-    { 'lua-5.3.6', 'lua5.3' },
-    { 'lua-5.2.4', 'lua5.2' },
     { 'lua-5.1.5', 'lua5.1' },
+    { 'lua-5.2.4', 'lua5.2' },
+    { 'lua-5.3.6', 'lua5.3' },
+    { 'lua-5.4.6', 'lua5.4' },
+    { 'lua-5.5.0', 'lua5.5' },
     --{ 'luajit-2.1.174-interp', 'luajit -joff' },
     { 'luajit-2.1.174', 'luajit' },
 }
@@ -37,12 +37,12 @@ local tests = {
     { 'mandelbrot', 'mandel.lua' },
     { 'juliaset', 'qt.lua' },
     { 'queen', 'queen.lua 12' },
-    { 'binary', 'binary-trees.lua 13' },
-    { 'n-body', 'n-body.lua 900000' },
-    { 'fannkuch', 'fannkuch-redux.lua 9' },
+    { 'binary', 'binary-trees.lua 14' },
+    { 'n-body', 'n-body.lua 800000' },
+    { 'fannkuch', 'fannkuch-redux.lua 10' },
     { 'fasta', 'fasta.lua 2500000' },
-    { 'k-nucleotide', 'k-nucleotide.lua < fasta1000000.txt' },
-    { 'regex-dna', 'regex-dna.lua < fasta1000000.txt' },
+    { 'k-nucleotide', 'k-nucleotide.lua < fasta900000.txt' },
+    { 'regex-dna', 'regex-dna.lua < fasta900000.txt' },
     { 'spectral-norm', 'spectral-norm.lua 1000' },
 }
 
@@ -51,19 +51,13 @@ local tests = {
 local nruns = 3
 local supress_errors = true
 local basename = 'results'
-local normalize = false
-local speedup = false
-local plot = true
 
 local usage = [[
 usage: lua ]] .. arg[0] .. [[ [options]
 options:
     --nruns <n>      number of times that each test is executed (default = 3)
     --no-supress     don't supress error messages from tests
-    --output <name>  name of the benchmark output
-    --normalize      normalize the result based on the first binary
-    --speedup        compute the speedup based on the first binary
-    --no-plot        don't create the plot with gnuplot
+    --output <name>  name of the benchmark output (default = 'results')
     --help           show this message
 ]]
 
@@ -91,12 +85,6 @@ local function parse_args()
             supress_errors = false
         elseif arg[i] == '--output' then
             basename = get_next_arg(i)
-        elseif arg[i] == '--normalize' then
-            normalize = true
-        elseif arg[i] == '--speedup' then
-            speedup = true
-        elseif arg[i] == '--no-plot' then
-            plot = false
         elseif arg[i] == '--help' then
             print(usage)
             os.exit()
@@ -111,17 +99,28 @@ end
 
 -- Run the command a single time and returns the time elapsed
 local function measure(cmd)
-    -- Changed: explicitly call 'bash -c' because TIMEFORMAT is a bash-specific feature.
-    -- Default /bin/sh (used by io.popen) often doesn't support it.
-    local time_cmd = 'bash -c "TIMEFORMAT=\'%3R\'; time ' ..  cmd ..
-            ' > /dev/null" 2>&1'
+    -- Use 'sh' explicitly to access the shell built-in 'time'.
+    -- '-p' creates POSIX portable output (real/user/sys).
+    -- We redirect the command's stdout to /dev/null, but keep stderr (where time prints)
+    -- and merge it to stdout (2>&1) so Lua can read it.
+    local time_cmd = 'sh -c "time -p ' ..  cmd .. ' > /dev/null" 2>&1'
+
     local handle = io.popen(time_cmd)
     local result = handle:read("*a")
-    local time_elapsed = tonumber(result)
     handle:close()
+
+    -- Parse the output looking for "real <number>"
+    -- Output format is usually:
+    -- real 0.55
+    -- user 0.50
+    -- sys 0.04
+    local time_elapsed = string.match(result, "real%s+([%d%.]+)")
+    time_elapsed = tonumber(time_elapsed)
+
     if not time_elapsed then
         error('Invalid output for "' .. cmd .. '":\n' .. (result or 'nil'))
     end
+
     return time_elapsed
 end
 
@@ -165,27 +164,21 @@ local function run_all()
     return results
 end
 
--- Perform an operation for each value in the matrix
-local function process_results(results, f)
-    for _, line in ipairs(results) do
+-- Helper to clone matrix and apply calculation
+local function get_derived_results(src_results, calc_func)
+    local new_results = create_matrix(#tests)
+    for i, line in ipairs(src_results) do
         local base = line[1]
-        for i = 1, #binaries do
-            line[i] = f(line[i], base)
+        for j = 1, #binaries do
+            -- Apply the calculation function (e.g., base / v)
+            new_results[i][j] = calc_func(line[j], base)
         end
     end
+    return new_results
 end
 
--- Print info about the host computer
-local function computer_info()
-    os.execute([[
-echo "Distro: "`cat /etc/*-release | head -1`
-echo "Kernel: "`uname -r`
-echo "CPU:    "`cat /proc/cpuinfo | grep 'model name' | tail -1 | \
-                sed 's/model name.*:.//'`]])
-end
-
--- Creates and saves the gnuplot data file
-local function create_data_file(results)
+-- Saves the results matrix to a specific filename
+local function create_data_file(filename, results)
     local data = 'test\t'
     for _, binary in ipairs(binaries) do
         data = data .. binary[1] .. '\t'
@@ -194,60 +187,67 @@ local function create_data_file(results)
     for i, test in ipairs(tests) do
         data = data .. test[1] .. '\t'
         for j, _ in ipairs(binaries) do
-            data = data .. results[i][j] .. '\t'
+            -- Format numbers to avoid excessive decimals in text files
+            local val = results[i][j]
+
+            -- Handle cases where benchmark failed (val is nil)
+            if val == nil then
+                val = "NaN"
+            elseif type(val) == "number" then
+                val = string.format("%.4f", val)
+            end
+
+            data = data .. val .. '\t'
         end
         data = data .. '\n'
     end
-    io.open(basename .. '.txt', 'w'):write(data):close()
-end
-
--- Generates the output image with gnuplot
-local function generate_image()
-    local ylabel
-    if normalize then
-        ylabel = 'Normalized time'
-    elseif speedup then
-        ylabel = 'Speedup'
+    local f = io.open(filename, 'w')
+    if f then
+        f:write(data)
+        f:close()
+        print('Saved: ' .. filename)
     else
-        ylabel = 'Elapsed time'
+        print('Error saving: ' .. filename)
     end
-    os.execute('gnuplot -e "datafile=\'' .. basename .. '.txt\'" ' ..
-               '-e "outfile=\'' .. basename .. '.png\'" ' ..
-               '-e "ylabel=\'' .. ylabel .. '\'" ' ..
-               '-e "nbinaries=' .. #binaries .. '" plot.gpi')
 end
 
 local function setup()
-    os.execute('luajit ' .. tests_root .. 'fasta.lua 1000000 > fasta1000000.txt')
+    os.execute('luajit ' .. tests_root .. 'fasta.lua 900000 > fasta900000.txt')
 end
 
 local function teardown()
-    os.execute('rm fasta1000000.txt')
+    os.execute('rm fasta900000.txt')
 end
+
 
 local function main()
     parse_args()
-    computer_info()
     setup()
+
+    -- 1. Run benchmarks (Raw data)
     local results = run_all()
     teardown()
-    local function f(v, base)
-        if not v then
-            return 0
-        elseif not base then
-            return v
-        elseif speedup then
-            return base / v
-        elseif normalize then
-            return v / base
-        else
-            return v
-        end
-    end
-    process_results(results, f)
-    create_data_file(results)
-    if plot then generate_image() end
-    print('final done')
+
+    -- 2. Save Raw Data
+    create_data_file(basename .. '.dat', results)
+
+    -- 3. Calculate and Save Normalized Data (lower is better, relative to first binary)
+    local results_norm = get_derived_results(results, function(v, base)
+        if not v or v == 0 then return 0 end
+        if not base then return v end
+        return v / base
+    end)
+    create_data_file(basename .. '-norm.dat', results_norm)
+
+    -- 4. Calculate and Save Speedup Data (higher is better, relative to first binary)
+    local results_speed = get_derived_results(results, function(v, base)
+        if not v or v == 0 then return 0 end
+        if not base then return v end
+        return base / v
+    end)
+    create_data_file(basename .. '-speed.dat', results_speed)
+
+    print('Benchmark complete. Run ./plots.sh '.. basename ..' to generate graphs.')
 end
 
 main()
